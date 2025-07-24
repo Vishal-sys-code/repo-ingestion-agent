@@ -10,3 +10,4 @@ huggingface-hub
 google-cloud-aiplatform
 click
 pytest
+redis
