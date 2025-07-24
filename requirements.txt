@@ -11,3 +11,5 @@ google-cloud-aiplatform
 click
 pytest
 redis
+langchain-huggingface
+InstructorEmbedding
