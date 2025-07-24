@@ -2,45 +2,66 @@ import os
 import shutil
 import sys
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import pytest
+import redis
+import json
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from ingestion.ingest import clone_repo, load_documents, create_vector_store, on_rm_error
+from ingestion.worker import enqueue_repo, ingestion_worker
+from ingestion.ingest import create_vector_store_from_chunks
 
-def test_clone_repo():
-    repo_url = "https://github.com/langchain-ai/langchain.git"
-    local_path = "/tmp/test_repo"
-    clone_repo(repo_url, local_path)
-    assert os.path.exists(local_path)
-    shutil.rmtree(local_path, onerror=on_rm_error)
+@pytest.fixture
+def mock_redis_client():
+    with patch("ingestion.worker.r", MagicMock()) as mock_redis_worker:
+        with patch("ingestion.ingest.redis.Redis") as mock_redis_ingest_class:
+            mock_redis_ingest_instance = MagicMock()
+            mock_redis_ingest_class.return_value = mock_redis_ingest_instance
+            yield (mock_redis_worker, mock_redis_ingest_instance)
 
-def test_load_documents():
-    repo_path = "/tmp/test_load_documents"
-    os.makedirs(repo_path, exist_ok=True)
-    with open(os.path.join(repo_path, "test.py"), "w") as f:
-        f.write("test content")
-    documents = load_documents(repo_path)
-    assert len(documents) == 1
-    assert documents[0] == "test content"
-    shutil.rmtree(repo_path)
+def test_enqueue_repo(mock_redis_client):
+    mock_redis_worker, _ = mock_redis_client
+    repo_url = "https://github.com/test/repo.git"
+    repo_id = "test_repo"
+    enqueue_repo(repo_url, repo_id)
+    expected_payload = json.dumps({"repo_url": repo_url, "repo_id": repo_id})
+    mock_redis_worker.lpush.assert_called_once_with("ingest:repos", expected_payload)
 
-@patch("ingestion.ingest.FAISS.from_documents")
-@patch("ingestion.ingest.HuggingFaceEmbeddings")
-@patch("ingestion.ingest.VertexAIEmbeddings")
-def test_create_vector_store(mock_vertex_embeddings, mock_hf_embeddings, mock_faiss):
-    documents = ["test content"]
-    db_path = "/tmp/test_db"
+@patch("ingestion.worker.Repo.clone_from")
+@patch("ingestion.worker.os.walk")
+def test_ingestion_worker(mock_walk, mock_clone, mock_redis_client):
+    mock_redis_worker, _ = mock_redis_client
+    mock_redis_worker.brpop.return_value = (None, json.dumps({"repo_url": "https://github.com/test/repo.git", "repo_id": "test_repo"}))
+    mock_walk.return_value = [("/tmp/repos/test_repo", [], ["test.py"])]
     
-    mock_hf_embeddings.return_value.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    mock_vertex_embeddings.return_value.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+    with patch("builtins.open", MagicMock()) as mock_open:
+        mock_open.return_value.read.return_value = "test content"
+        # Make the worker run only once
+        mock_redis_worker.brpop.side_effect = [(None, json.dumps({"repo_url": "https://github.com/test/repo.git", "repo_id": "test_repo"})), redis.exceptions.TimeoutError]
+        try:
+            ingestion_worker()
+        except redis.exceptions.TimeoutError:
+            pass
+    
+    mock_clone.assert_called_once_with("https://github.com/test/repo.git", "/tmp/repos/test_repo")
+    mock_redis_worker.lpush.assert_called()
 
-    # Test HuggingFace embeddings
-    create_vector_store(documents, "huggingface", db_path)
-    mock_hf_embeddings.assert_called_once()
-    mock_faiss.return_value.save_local.assert_called_with(db_path)
-
-    # Test Google embeddings
-    create_vector_store(documents, "google", db_path)
-    mock_vertex_embeddings.assert_called_once()
-    mock_faiss.return_value.save_local.assert_called_with(db_path)
+@patch("ingestion.ingest.FAISS")
+@patch("ingestion.ingest.HuggingFaceEmbeddings")
+def test_create_vector_store_from_chunks(mock_hf_embeddings, mock_faiss, mock_redis_client):
+    _, mock_redis_ingest = mock_redis_client
+    mock_redis_ingest.brpop.return_value = (None, json.dumps({"repo_id": "test_repo", "file_path": "test.py", "chunk_index": 0, "text": "test content"}))
+    
+    # Make the worker run only once
+    mock_redis_ingest.brpop.side_effect = [(None, json.dumps({"repo_id": "test_repo", "file_path": "test.py", "chunk_index": 0, "text": "test content"})), redis.exceptions.TimeoutError]
+    
+    with patch("os.path.exists") as mock_exists:
+        mock_exists.return_value = False
+        try:
+            create_vector_store_from_chunks("huggingface", "/tmp/test_db")
+        except redis.exceptions.TimeoutError:
+            pass
+    
+    mock_faiss.from_texts.assert_called_once_with(["test content"], mock_hf_embeddings.return_value)
+    mock_faiss.from_texts.return_value.save_local.assert_called_with("/tmp/test_db")

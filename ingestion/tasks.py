@@ -1,21 +1,19 @@
 from celery import Celery
-from ingestion.ingest import main as ingest_repo
+from ingestion.worker import ingestion_worker, enqueue_repo
+import redis, json
 
 celery_app = Celery("tasks", broker="redis://localhost:6379/0", backend="redis://localhost:6379/0")
 
 @celery_app.task
-def ingest_repo_task(repo_url, embeddings_type, db_path):
+def ingestion_worker_task():
     """
-    Celery task to ingest a repository.
+    Celery task to run the ingestion worker.
     """
-    ingest_repo.main(
-        [
-            "--repo_url",
-            repo_url,
-            "--embeddings_type",
-            embeddings_type,
-            "--db_path",
-            db_path,
-        ],
-        standalone_mode=False,
-    )
+    ingestion_worker()
+
+@celery_app.task
+def enqueue_repo_task(repo_url, repo_id):
+    """
+    Celery task to enqueue a repository for ingestion.
+    """
+    enqueue_repo(repo_url, repo_id)
