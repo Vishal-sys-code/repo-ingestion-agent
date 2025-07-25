@@ -1,3 +1,4 @@
+import pytest
 import os
 import sys
 import json
@@ -48,3 +49,6 @@ def test_load_and_chunk_documents(mock_redis):
 
     # Assert that the chunk was pushed to Redis
     mock_redis_instance.lpush.assert_called_once()
+
+if __name__ == "__main__":
+    pytest.main()
