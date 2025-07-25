@@ -38,3 +38,7 @@ def embedding_worker(r):
         )
         vectordb.add_documents([doc], ids=[f"{task['repo_id']}/{task['file_path']}/{task['chunk_index']}"])
         vectordb.save_local("faiss.index")
+
+if __name__ == "__main__":
+    r = redis.Redis(host="127.0.0.1", port=6379, db=0)
+    embedding_worker(r)
