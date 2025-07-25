@@ -1,8 +1,11 @@
+from functools import partial
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings,GoogleGenerativeAI
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnablePassthrough
+
 load_dotenv()
 
 # Load the vector database
@@ -23,18 +26,19 @@ prompt = PromptTemplate(
     template=template
 )
 
-qa = RetrievalQA.from_chain_type(
-    llm=GoogleGenerativeAI(model="gemini-pro"),
-    chain_type="stuff",
-    retriever=retriever,
-    return_source_documents=True,
-    chain_type_kwargs={
-        "prompt": prompt,
-        "document_variable_name": "context"
-    }
-)
+
 
 def retrieve(repo_id, question):
+    qa = RetrievalQA.from_chain_type(
+        llm=GoogleGenerativeAI(model="gemini-pro"),
+        chain_type="stuff",
+        retriever=retriever,
+        return_source_documents=True,
+        chain_type_kwargs={
+            "prompt": prompt,
+            "document_variable_name": "context"
+        }
+    )
     result = qa.invoke({"repo_id": repo_id, "query": question})
     # The result is a dictionary containing the answer and the source documents.
     # The answer is in the "result" key.
