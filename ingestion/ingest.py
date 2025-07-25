@@ -11,8 +11,6 @@ from langchain_community.embeddings import HuggingFaceEmbeddings, VertexAIEmbedd
 import time
 import stat
 
-r = redis.Redis(host="localhost", port=6379, db=0)
-
 def on_rm_error(func, path, exc_info):
     """
     Error handler for shutil.rmtree.
@@ -44,6 +42,7 @@ def load_and_chunk_documents(repo_path, repo_id):
     """
     Load documents from a repository and chunk them.
     """
+    r = redis.Redis(host="localhost", port=6379, db=0)
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     for root, _, files in os.walk(repo_path):
         for file in files:

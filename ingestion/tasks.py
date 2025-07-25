@@ -1,4 +1,5 @@
 from celery import Celery
+import redis
 from ingestion.ingest import main as ingest_repo
 from embedding_agent import embedding_worker
 
@@ -24,4 +25,5 @@ def embedding_worker_task():
     """
     Celery task to run the embedding worker.
     """
-    embedding_worker()
+    r = redis.Redis(host="localhost", port=6379, db=0)
+    embedding_worker(r)

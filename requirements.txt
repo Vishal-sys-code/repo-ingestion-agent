@@ -6,10 +6,9 @@ uvicorn
 faiss-cpu
 redis
 celery
-huggingface-hub
-google-cloud-aiplatform
 click
 pytest
 redis
-langchain-huggingface
-InstructorEmbedding
+langchain-google-genai
+python-dotenv
+faiss-cpu

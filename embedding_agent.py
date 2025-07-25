@@ -1,35 +1,33 @@
-import redis, json
+import redis, json, os
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
-from langchain_community.embeddings import HuggingFaceInstructEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.embeddings import VertexAIEmbeddings
 
-# A) HuggingFace from langchain.embeddings import HuggingFaceInstructEmbeddings
-emb_model_huggingface = HuggingFaceInstructEmbeddings(
-    model_name="hkunlp/instructor-xl",
-    model_kwargs={"device": "cpu"}
-)
+from dotenv import load_dotenv
+load_dotenv()
 
-# B) Google Gemini (via Vertex AI) from langchain.embeddings import VertexAIEmbeddings
-emb_model_gemini = VertexAIEmbeddings(
-    # project="YOUR_GCP_PROJECT",  # Will be set from config
-    location="us-central1",
-    model_name="gemini-pro-embeddings-beta"
-)
+# Google Gemini (via Vertex AI) from langchain.embeddings import VertexAIEmbeddings
+emb_model_gemini = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
-r = redis.Redis(host="localhost", port=6379, db=0)
+import faiss
 
 # On-disk index + SQLite for metadata
-vectordb = FAISS(
-    embedding_function=emb_model_huggingface,  # Default to HuggingFace
-    index_path="faiss.index",
-    docstore_path="faiss_meta.db"
-)
+if os.path.exists("faiss.index"):
+    vectordb = FAISS.load_local("faiss.index", emb_model_gemini, allow_dangerous_deserialization=True)
+else:
+    index = faiss.IndexFlatL2(768)  # Assuming the embedding dimension is 768
+    vectordb = FAISS(embedding_function=emb_model_gemini, index=index, docstore={}, index_to_docstore_id={})
+    vectordb.save_local("faiss.index")
 
-def embedding_worker():
+
+def embedding_worker(r):
     while True:
-        _, raw = r.brpop("ingest:chunks")
-        task = json.loads(raw)
+        try:
+            _, raw = r.brpop("ingest:chunks")
+            task = json.loads(raw)
+        except StopIteration:
+            break
         doc = Document(
             page_content=task["text"],
             metadata={
@@ -39,3 +37,4 @@ def embedding_worker():
             }
         )
         vectordb.add_documents([doc], ids=[f"{task['repo_id']}/{task['file_path']}/{task['chunk_index']}"])
+        vectordb.save_local("faiss.index")

@@ -8,40 +8,34 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from embedding_agent import embedding_worker
 from ingestion.ingest import load_and_chunk_documents
 
-@patch("redis.Redis")
-@patch("langchain.vectorstores.FAISS")
-def test_embedding_worker(mock_faiss, mock_redis):
+@patch("langchain_community.vectorstores.FAISS")
+def test_embedding_worker(mock_faiss):
     # Mock Redis
     mock_redis_instance = MagicMock()
-    mock_redis.return_value = mock_redis_instance
-    mock_redis_instance.brpop.return_value = (
-        b"ingest:chunks",
-        json.dumps({
-            "text": "test content",
-            "repo_id": "test_repo",
-            "file_path": "test_file.py",
-            "chunk_index": 0,
-        }).encode("utf-8"),
-    )
+    mock_redis_instance.brpop.side_effect = [
+        (
+            b"ingest:chunks",
+            json.dumps({
+                "text": "test content",
+                "repo_id": "test_repo",
+                "file_path": "test_file.py",
+                "chunk_index": 0,
+            }).encode("utf-8"),
+        ),
+        StopIteration,
+    ]
 
     # Mock FAISS
     mock_faiss_instance = MagicMock()
-    mock_faiss.return_value = mock_faiss_instance
+    mock_faiss.load_local.return_value = mock_faiss_instance
 
-    # Run the worker in a separate thread
-    import threading
-    worker_thread = threading.Thread(target=embedding_worker)
-    worker_thread.daemon = True
-    worker_thread.start()
-
-    # Wait for the worker to process the item
-    import time
-    time.sleep(1)
+    # Run the worker
+    embedding_worker(mock_redis_instance)
 
     # Assert that the document was added to the vector store
     mock_faiss_instance.add_documents.assert_called_once()
 
-@patch("redis.Redis")
+@patch("ingestion.ingest.redis.Redis")
 def test_load_and_chunk_documents(mock_redis):
     # Mock Redis
     mock_redis_instance = MagicMock()
